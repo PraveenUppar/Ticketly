@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live seats demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; }
+    input, button { font: inherit; padding: .5rem; }
+    input { width: 100%; box-sizing: border-box; margin-bottom: .5rem; }
+    #seats { font-size: 4rem; font-weight: 700; margin: 1rem 0 0; }
+    #status { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Live seats</h1>
+  <p>Paste an event id, press Watch, then book seats from Postman. The number changes without refreshing.</p>
+  <input id="eventId" placeholder="event id (uuid)" />
+  <button id="watch">Watch</button>
+  <div id="seats">-</div>
+  <div id="status">not connected</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const seats = document.getElementById('seats');
+    const status = document.getElementById('status');
+    let current = null;
+
+    socket.on('connect', () => (status.textContent = 'connected'));
+    socket.on('disconnect', () => (status.textContent = 'disconnected'));
+
+    socket.on('seats:update', ({ eventId, seatsLeft }) => {
+      if (eventId === current) seats.textContent = seatsLeft;
+    });
+
+    document.getElementById('watch').onclick = () => {
+      if (current) socket.emit('event:leave', current);
+      current = document.getElementById('eventId').value.trim();
+      socket.emit('event:join', current, (res) => {
+        if (res.ok) { seats.textContent = res.seatsLeft; status.textContent = 'watching ' + current; }
+        else { seats.textContent = '-'; status.textContent = res.error; current = null; }
+      });
+    };
+  </script>
+</body>
+</html>
