@@ -1,130 +1,130 @@
-generator client {
-  provider = "prisma-client-js"
-}
+  generator client {
+    provider = "prisma-client-js"
+  }
 
-datasource db {
-  provider = "mysql"
-}
+  datasource db {
+    provider = "mysql"
+  }
 
-enum Role {
-  USER
-  ADMIN
-}
+  enum Role {
+    USER
+    ADMIN
+  }
 
-enum EventStatus {
-  UPCOMING
-  FINISHED
-}
+  enum EventStatus {
+    UPCOMING
+    FINISHED
+  }
 
-// PENDING_PAYMENT: seats are held while the user pays. CONFIRMED: paid (or free).
-// CANCELLED: cancelled by a person. EXPIRED: the hold ran out before payment arrived.
-enum BookingStatus {
-  PENDING_PAYMENT
-  CONFIRMED
-  CANCELLED
-  EXPIRED
-}
+  // PENDING_PAYMENT: seats are held while the user pays. CONFIRMED: paid (or free).
+  // CANCELLED: cancelled by a person. EXPIRED: the hold ran out before payment arrived.
+  enum BookingStatus {
+    PENDING_PAYMENT
+    CONFIRMED
+    CANCELLED
+    EXPIRED
+  }
 
-// CREATED: order exists, waiting. FAILED: an attempt failed (the user may retry the same order).
-// SUCCEEDED: money received. REFUND_PENDING: we asked the provider to refund. REFUNDED: done.
-enum PaymentStatus {
-  CREATED
-  FAILED
-  SUCCEEDED
-  REFUND_PENDING
-  REFUNDED
-}
+  // CREATED: order exists, waiting. FAILED: an attempt failed (the user may retry the same order).
+  // SUCCEEDED: money received. REFUND_PENDING: we asked the provider to refund. REFUNDED: done.
+  enum PaymentStatus {
+    CREATED
+    FAILED
+    SUCCEEDED
+    REFUND_PENDING
+    REFUNDED
+  }
 
-model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  passwordHash String
-  role         Role      @default(USER)
-  createdAt    DateTime  @default(now())
-  bookings     Booking[]
-}
+  model User {
+    id           String    @id @default(uuid())
+    email        String    @unique
+    passwordHash String
+    role         Role      @default(USER)
+    createdAt    DateTime  @default(now())
+    bookings     Booking[]
+  }
 
-model Event {
-  id          String      @id @default(uuid())
-  title       String
-  description String?     @db.Text
-  city        String
-  date        DateTime
-  price       Decimal     @db.Decimal(10, 2)
-  totalSeats  Int
-  seatsLeft   Int
-  status      EventStatus @default(UPCOMING)
-  createdAt   DateTime    @default(now())
-  bookings    Booking[]
+  model Event {
+    id          String      @id @default(uuid())
+    title       String
+    description String?     @db.Text
+    city        String
+    date        DateTime
+    price       Decimal     @db.Decimal(10, 2)
+    totalSeats  Int
+    seatsLeft   Int
+    status      EventStatus @default(UPCOMING)
+    createdAt   DateTime    @default(now())
+    bookings    Booking[]
 
-  @@index([city])
-  @@index([date])
-}
+    @@index([city])
+    @@index([date])
+  }
 
-model Booking {
-  id          String        @id @default(uuid())
-  userId      String
-  eventId     String
-  quantity    Int
-  status      BookingStatus @default(CONFIRMED)
-  // Price snapshot in MINOR units (paise/cents), so a later price edit cannot change what was charged.
-  // Integers only: money must never be stored as a float.
-  amountMinor Int           @default(0)
-  currency    String        @default("INR")
-  expiresAt   DateTime? // only set while PENDING_PAYMENT
-  createdAt   DateTime      @default(now())
+  model Booking {
+    id          String        @id @default(uuid())
+    userId      String
+    eventId     String
+    quantity    Int
+    status      BookingStatus @default(CONFIRMED)
+    // Price snapshot in MINOR units (paise/cents), so a later price edit cannot change what was charged.
+    // Integers only: money must never be stored as a float.
+    amountMinor Int           @default(0)
+    currency    String        @default("INR")
+    expiresAt   DateTime? // only set while PENDING_PAYMENT
+    createdAt   DateTime      @default(now())
 
-  user    User     @relation(fields: [userId], references: [id])
-  event   Event    @relation(fields: [eventId], references: [id])
-  payment Payment?
+    user    User     @relation(fields: [userId], references: [id])
+    event   Event    @relation(fields: [eventId], references: [id])
+    payment Payment?
 
-  @@index([userId])
-  @@index([eventId])
-  @@index([status, expiresAt])
-}
+    @@index([userId])
+    @@index([eventId])
+    @@index([status, expiresAt])
+  }
 
-// One payment per (paid) booking.
-model Payment {
-  id                String        @id @default(uuid())
-  bookingId         String        @unique
-  provider          String
-  providerOrderId   String        @unique
-  providerPaymentId String?
-  providerRefundId  String?
-  amountMinor       Int
-  currency          String
-  status            PaymentStatus @default(CREATED)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  // One payment per (paid) booking.
+  model Payment {
+    id                String        @id @default(uuid())
+    bookingId         String        @unique
+    provider          String
+    providerOrderId   String        @unique
+    providerPaymentId String?
+    providerRefundId  String?
+    amountMinor       Int
+    currency          String
+    status            PaymentStatus @default(CREATED)
+    createdAt         DateTime      @default(now())
+    updatedAt         DateTime      @updatedAt
 
-  booking Booking @relation(fields: [bookingId], references: [id])
+    booking Booking @relation(fields: [bookingId], references: [id])
 
-  @@index([status])
-}
+    @@index([status])
+  }
 
-// Inbox of webhooks received FROM the payment provider. The unique key is how we ignore
-// duplicates (providers deliver at least once), and the rows are an audit trail.
-model PaymentWebhookEvent {
-  id              String    @id @default(uuid())
-  provider        String
-  providerEventId String
-  type            String
-  payload         Json
-  result          String? // what we did, e.g. "confirmed", "late-payment", "amount-mismatch"
-  processedAt     DateTime? // null = received but not finished (a retry may re-run it)
-  createdAt       DateTime  @default(now())
+  // Inbox of webhooks received FROM the payment provider. The unique key is how we ignore
+  // duplicates (providers deliver at least once), and the rows are an audit trail.
+  model PaymentWebhookEvent {
+    id              String    @id @default(uuid())
+    provider        String
+    providerEventId String
+    type            String
+    payload         Json
+    result          String? // what we did, e.g. "confirmed", "late-payment", "amount-mismatch"
+    processedAt     DateTime? // null = received but not finished (a retry may re-run it)
+    createdAt       DateTime  @default(now())
 
-  @@unique([provider, providerEventId])
-}
+    @@unique([provider, providerEventId])
+  }
 
-// Where we POST notifications. Registered by admins.
-model WebhookEndpoint {
-  id           String   @id @default(uuid())
-  url          String   @db.VarChar(2048)
-  secret       String // used to sign each request (HMAC), shown to the admin only once
-  events       Json // e.g. ["booking.confirmed", "booking.cancelled"]
-  active       Boolean  @default(true)
-  failureCount Int      @default(0) // deliveries in a row that failed after all retries
-  createdById  String
-  createdAt    DateTime @default(now())
-}
+  // Where we POST notifications. Registered by admins.
+  model WebhookEndpoint {
+    id           String   @id @default(uuid())
+    url          String   @db.VarChar(2048)
+    secret       String // used to sign each request (HMAC), shown to the admin only once
+    events       Json // e.g. ["booking.confirmed", "booking.cancelled"]
+    active       Boolean  @default(true)
+    failureCount Int      @default(0) // deliveries in a row that failed after all retries
+    createdById  String
+    createdAt    DateTime @default(now())
+  }

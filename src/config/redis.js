@@ -1,12 +1,41 @@
-import Redis from 'ioredis';
-import { REDIS_URL, NODE_ENV } from './env.js';
-import logger from '../utils/logger.js';
+// This file creates the Redis connections for your app.
+// Why 3 different connections?
+// Each job needs different behavior when Redis is slow or down.
+//
+//   cacheRedis        for caching.
+//                     Must FAIL FAST. If Redis is down, skip the cache and
+//                     read from MySQL instead of making the user wait.
+//
+//   producerRedis     for ADDING jobs to the queue (example: after a booking).
+//                     Also fails fast, so a booking request never hangs
+//                     waiting for Redis.
+//
+//   createWorkerRedis for the WORKER that reads and runs jobs.
+//                     Workers wait for new jobs using blocking commands.
+//                     BullMQ requires maxRetriesPerRequest: null here,
+//                     which means "keep retrying forever". That is what a
+//                     worker needs, because it should wait until Redis is back.
+//
+// Helper settings:
+//   withErrorLogging  adds an 'error' listener to each client.
+//                     Without it, a Redis outage would crash Node.
+//                     It logs at most once every 10 seconds, so a down Redis
+//                     does not flood your console.
+//
+//   lazyConnect       in tests (NODE_ENV = "test"), do not connect until the
+//                     first command is sent. So tests never open a real
+//                     Redis connection by accident.
+//
+//   retryStrategy     if the connection drops, wait longer each time before
+//                     retrying: 500ms, 1000ms, 1500ms ... up to 5000ms (5 seconds).
 
-// Without an 'error' listener, a Redis outage would crash Node (unhandled 'error' event).
-// We log at most once every 10s so a down Redis doesn't flood the console.
+import Redis from "ioredis";
+import { REDIS_URL, NODE_ENV } from "./env.js";
+import logger from "../utils/logger.js";
+
 function withErrorLogging(client, name) {
   let lastLogged = 0;
-  client.on('error', (err) => {
+  client.on("error", (err) => {
     const now = Date.now();
     if (now - lastLogged > 10_000) {
       lastLogged = now;
@@ -16,13 +45,11 @@ function withErrorLogging(client, name) {
   return client;
 }
 
-// In tests we never want to open a real Redis connection: lazyConnect waits for the first command.
-const lazyConnect = NODE_ENV === 'test';
+const lazyConnect = NODE_ENV === "test";
 
 const retryStrategy = (times) => Math.min(times * 500, 5000);
 
-// 1) CACHE client: must FAIL FAST. If Redis is down we want the request to skip the
-//    cache and hit MySQL, not hang. So: no offline queue, short command timeout.
+// reading/saving cached data
 export const cacheRedis = withErrorLogging(
   new Redis(REDIS_URL, {
     enableOfflineQueue: false,
@@ -31,11 +58,10 @@ export const cacheRedis = withErrorLogging(
     lazyConnect,
     retryStrategy,
   }),
-  'cache',
+  "cache",
 );
 
-// 2) PRODUCER connection for adding jobs to the queue: also fail fast, so a booking
-//    request never hangs waiting for Redis.
+// adding jobs to the queue
 export const producerRedis = withErrorLogging(
   new Redis(REDIS_URL, {
     enableOfflineQueue: false,
@@ -43,10 +69,12 @@ export const producerRedis = withErrorLogging(
     lazyConnect,
     retryStrategy,
   }),
-  'queue',
+  "queue",
 );
 
-// 3) WORKER connection: BullMQ workers use blocking commands, and BullMQ REQUIRES
-//    maxRetriesPerRequest: null here (it keeps retrying forever, which is what we want).
+// the worker
 export const createWorkerRedis = () =>
-  withErrorLogging(new Redis(REDIS_URL, { maxRetriesPerRequest: null, retryStrategy }), 'worker');
+  withErrorLogging(
+    new Redis(REDIS_URL, { maxRetriesPerRequest: null, retryStrategy }),
+    "worker",
+  );
