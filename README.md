@@ -1,33 +1,33 @@
 # Mini Event Booking API
 
-Built as a practice project that touches most of the
-backend topics: validation, error handling, auth and roles, SQL transactions, pagination, caching,
-background jobs, WebSockets, testing and logging.
+Designed concurrency safe ticket booking and payment workflows using atomic SQL updates and transactions to prevent double booking, 5-minute ticket holds, signed idempotent payment webhooks and automated refund handling.
+
+Built 2 scheduled cron jobs and 2 BullMQ background workers for event finalization, booking expiry, refunds, email notifications, and webhook delivery with retry/backoff handling; implemented 23 REST APIs with JWT authentication, RBAC, Zod validation, centralized error handling, request-ID logging, and Redis caching.
 
 ## Tech stack
 
-| Concern | Tool |
-|---|---|
-| Server | Node.js 22, Express 5 (ES modules, plain JavaScript) |
-| Validation | Zod 4 |
-| Relational data (users, events, bookings) | MySQL 8 + Prisma 7 |
-| Flexible data (reviews, notification log) | MongoDB + Mongoose |
-| Cache and job queue | Redis (ioredis) + BullMQ |
-| Scheduled work | node-cron |
-| Email | nodemailer (prints to the console unless `SMTP_URL` is set) |
-| Outgoing webhooks | node:https + HMAC-SHA256 signing (`node:crypto`), delivered through BullMQ |
-| Payments | A provider interface with a fake provider (no account, no money); incoming signed webhooks, refunds |
-| Live updates | Socket.io |
-| Auth | JWT (jsonwebtoken) + bcrypt |
-| Logging | morgan-style access log + request ID on every line |
-| Tests | `node:test` + Supertest + socket.io-client |
+| Concern                                   | Tool                                                                                                |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Server                                    | Node.js 22, Express 5 (ES modules, plain JavaScript)                                                |
+| Validation                                | Zod 4                                                                                               |
+| Relational data (users, events, bookings) | MySQL 8 + Prisma 7                                                                                  |
+| Flexible data (reviews, notification log) | MongoDB + Mongoose                                                                                  |
+| Cache and job queue                       | Redis (ioredis) + BullMQ                                                                            |
+| Scheduled work                            | node-cron                                                                                           |
+| Email                                     | nodemailer (prints to the console unless `SMTP_URL` is set)                                         |
+| Outgoing webhooks                         | node:https + HMAC-SHA256 signing (`node:crypto`), delivered through BullMQ                          |
+| Payments                                  | A provider interface with a fake provider (no account, no money); incoming signed webhooks, refunds |
+| Live updates                              | Socket.io                                                                                           |
+| Auth                                      | JWT (jsonwebtoken) + bcrypt                                                                         |
+| Logging                                   | morgan-style access log + request ID on every line                                                  |
+| Tests                                     | `node:test` + Supertest + socket.io-client                                                          |
 
 ## Which database stores what
 
-| Database | Stores | Why |
-|---|---|---|
-| MySQL (Prisma) | Users, Events, Bookings | Linked data that must be exact (seat counts). Needs transactions. |
-| MongoDB (Mongoose) | Reviews, Notifications | Flexible, grows fast, no strict links. |
+| Database           | Stores                  | Why                                                               |
+| ------------------ | ----------------------- | ----------------------------------------------------------------- |
+| MySQL (Prisma)     | Users, Events, Bookings | Linked data that must be exact (seat counts). Needs transactions. |
+| MongoDB (Mongoose) | Reviews, Notifications  | Flexible, grows fast, no strict links.                            |
 
 MongoDB cannot check that an `eventId` exists in MySQL, so `createReview` asks MySQL itself before saving.
 
@@ -528,6 +528,7 @@ stateDiagram-v2
 ## Getting started
 
 ### Prerequisites
+
 - Node.js 22 or newer
 - MySQL 8 running locally
 - MongoDB running locally (the server refuses to start without it)
@@ -535,6 +536,7 @@ stateDiagram-v2
   on Windows use Memurai, Docker or WSL)
 
 ### Install and configure
+
 ```bash
 npm install
 npx prisma generate
@@ -571,12 +573,15 @@ JWT_EXPIRES_IN=1d
 `.env` is in `.gitignore`. Never commit it.
 
 ### Create the tables
+
 ```bash
 npx prisma migrate dev
 ```
+
 This creates the `event_booking` database if needed and applies the migrations.
 
 ### Run
+
 ```bash
 npm run dev     # nodemon, auto-restart on changes
 npm start       # plain node
@@ -585,6 +590,7 @@ npm start       # plain node
 The API listens on `http://localhost:3000`. Check `GET /health`.
 
 ### Make yourself an admin
+
 Signup always creates a normal `USER` (a role in the request body is ignored on purpose). Promote an account
 directly in the database, then log in again, because the role is stored inside the token:
 
@@ -594,12 +600,12 @@ UPDATE event_booking.User SET role = 'ADMIN' WHERE email = 'you@example.com';
 
 ## Scripts
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Start with nodemon |
-| `npm start` | Start with node |
-| `npm test` | Run the test suite (needs the test database, see below) |
-| `npm run test:migrate` | Apply migrations to the test database |
+| Command                | What it does                                            |
+| ---------------------- | ------------------------------------------------------- |
+| `npm run dev`          | Start with nodemon                                      |
+| `npm start`            | Start with node                                         |
+| `npm test`             | Run the test suite (needs the test database, see below) |
+| `npm run test:migrate` | Apply migrations to the test database                   |
 
 ## API reference
 
@@ -608,20 +614,22 @@ Errors: `{ "status": "error", "message": "...", "details": [...] }` (`details` o
 Protected routes need the header `Authorization: Bearer <token>`.
 
 ### Auth
-| Method | Path | Access | Notes |
-|---|---|---|---|
-| POST | `/api/auth/signup` | public | `{ email, password }`, password 8 to 72 chars |
-| POST | `/api/auth/login` | public | Returns `{ token, user }` |
-| GET | `/api/auth/me` | logged in | Current user |
+
+| Method | Path               | Access    | Notes                                         |
+| ------ | ------------------ | --------- | --------------------------------------------- |
+| POST   | `/api/auth/signup` | public    | `{ email, password }`, password 8 to 72 chars |
+| POST   | `/api/auth/login`  | public    | Returns `{ token, user }`                     |
+| GET    | `/api/auth/me`     | logged in | Current user                                  |
 
 ### Events
-| Method | Path | Access | Notes |
-|---|---|---|---|
-| GET | `/api/events` | public | Query: `page`, `limit` (max 50), `city`, `q`, `sort` |
-| GET | `/api/events/:id` | public | |
-| POST | `/api/events` | admin | `{ title, description?, city, date, price, totalSeats }` |
-| PATCH | `/api/events/:id` | admin | Any of title, description, city, date, price |
-| DELETE | `/api/events/:id` | admin | 409 if the event has bookings |
+
+| Method | Path              | Access | Notes                                                    |
+| ------ | ----------------- | ------ | -------------------------------------------------------- |
+| GET    | `/api/events`     | public | Query: `page`, `limit` (max 50), `city`, `q`, `sort`     |
+| GET    | `/api/events/:id` | public |                                                          |
+| POST   | `/api/events`     | admin  | `{ title, description?, city, date, price, totalSeats }` |
+| PATCH  | `/api/events/:id` | admin  | Any of title, description, city, date, price             |
+| DELETE | `/api/events/:id` | admin  | 409 if the event has bookings                            |
 
 `sort` accepts `date`, `price`, `createdAt`, with a `-` prefix for descending (`sort=-price`).
 The list returns only `UPCOMING` events and includes `meta: { page, limit, total, totalPages }`.
@@ -629,12 +637,13 @@ Example: `GET /api/events?city=Raipur&q=music&sort=date&page=1&limit=10`.
 The response has an `X-Cache: HIT` or `MISS` header.
 
 ### Bookings (all need login)
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/api/bookings` | `{ eventId, quantity }`, quantity 1 to 10. 409 when not enough seats. See below |
-| GET | `/api/bookings/me` | My bookings with their payment status, paginated |
-| GET | `/api/bookings/:id` | Owner or admin |
-| PATCH | `/api/bookings/:id/cancel` | Owner or admin. Gives the seats back and refunds a paid booking |
+
+| Method | Path                       | Notes                                                                           |
+| ------ | -------------------------- | ------------------------------------------------------------------------------- |
+| POST   | `/api/bookings`            | `{ eventId, quantity }`, quantity 1 to 10. 409 when not enough seats. See below |
+| GET    | `/api/bookings/me`         | My bookings with their payment status, paginated                                |
+| GET    | `/api/bookings/:id`        | Owner or admin                                                                  |
+| PATCH  | `/api/bookings/:id/cancel` | Owner or admin. Gives the seats back and refunds a paid booking                 |
 
 `POST /api/bookings` on a **paid** event returns `booking.status: "PENDING_PAYMENT"` plus a `payment` object
 (`orderId`, `amountMinor`, `currency`, `expiresAt`, `checkout`). The client pays before `expiresAt`, and the
@@ -642,12 +651,14 @@ booking turns `CONFIRMED` once the provider's webhook arrives. On a **free** eve
 `CONFIRMED` immediately and `payment` is `null`. Amounts are integers in minor units (25000 = 250.00).
 
 ### Payments
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/api/payments/webhook` | **Called by the payment provider**, not by your users. No JWT, the signature is the authentication. Always answers 2xx once processed |
-| POST | `/api/dev/fake-provider/events` | Dev only (fake provider). Logged in. `{ type, orderId }` where `type` is `payment.succeeded`, `payment.failed` or `refund.processed`. Plays the provider for your own orders |
+
+| Method | Path                            | Notes                                                                                                                                                                        |
+| ------ | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/payments/webhook`         | **Called by the payment provider**, not by your users. No JWT, the signature is the authentication. Always answers 2xx once processed                                        |
+| POST   | `/api/dev/fake-provider/events` | Dev only (fake provider). Logged in. `{ type, orderId }` where `type` is `payment.succeeded`, `payment.failed` or `refund.processed`. Plays the provider for your own orders |
 
 **Try the whole flow locally** (no account, no money):
+
 1. Book a seat on an event with a price: `POST /api/bookings`. Note `payment.orderId`. Status is `PENDING_PAYMENT`.
 2. "Pay": `POST /api/dev/fake-provider/events` with `{ "type": "payment.succeeded", "orderId": "<orderId>" }`.
 3. `GET /api/bookings/:id`: it is now `CONFIRMED`. The email job and the `booking.confirmed` webhook fire now.
@@ -660,39 +671,43 @@ one: headers `X-Fake-Timestamp` and `X-Fake-Signature`, an HMAC of `"<timestamp>
 `PAYMENT_WEBHOOK_SECRET`). A real Razorpay or Stripe adapter would verify their own signature format instead.
 
 ### Reviews
-| Method | Path | Access | Notes |
-|---|---|---|---|
-| POST | `/api/events/:eventId/reviews` | logged in | `{ rating 1-5, comment? }`. Requires a confirmed booking. One per user per event |
-| GET | `/api/events/:eventId/reviews` | public | Paginated, `meta.avgRating` included |
-| DELETE | `/api/reviews/:id` | owner or admin | |
+
+| Method | Path                           | Access         | Notes                                                                            |
+| ------ | ------------------------------ | -------------- | -------------------------------------------------------------------------------- |
+| POST   | `/api/events/:eventId/reviews` | logged in      | `{ rating 1-5, comment? }`. Requires a confirmed booking. One per user per event |
+| GET    | `/api/events/:eventId/reviews` | public         | Paginated, `meta.avgRating` included                                             |
+| DELETE | `/api/reviews/:id`             | owner or admin |                                                                                  |
 
 ### Notifications (all need login)
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/api/notifications` | Mine, `?unread=true` to filter |
-| PATCH | `/api/notifications/:id/read` | Mark one as read |
+
+| Method | Path                          | Notes                          |
+| ------ | ----------------------------- | ------------------------------ |
+| GET    | `/api/notifications`          | Mine, `?unread=true` to filter |
+| PATCH  | `/api/notifications/:id/read` | Mark one as read               |
 
 ### Live seats (Socket.io)
+
 Connect to the same host and port as the API.
 
-| Direction | Event | Payload |
-|---|---|---|
-| client to server | `event:join` | `eventId`, with an ack callback that returns `{ ok, seatsLeft }` or `{ ok: false, error }` |
-| client to server | `event:leave` | `eventId` |
-| server to client | `seats:update` | `{ eventId, seatsLeft }`, sent after every booking or cancel |
+| Direction        | Event          | Payload                                                                                    |
+| ---------------- | -------------- | ------------------------------------------------------------------------------------------ |
+| client to server | `event:join`   | `eventId`, with an ack callback that returns `{ ok, seatsLeft }` or `{ ok: false, error }` |
+| client to server | `event:leave`  | `eventId`                                                                                  |
+| server to client | `seats:update` | `{ eventId, seatsLeft }`, sent after every booking or cancel                               |
 
 Demo page: open `http://localhost:3000/live-seats.html`, paste an event id, press Watch, then book from
 Postman and watch the number change.
 
 ### Webhooks (admin only)
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/api/webhooks` | `{ url, events }`. Returns the `secret` **once**, so save it |
-| GET | `/api/webhooks` | List endpoints (the secret is never shown again) |
-| PATCH | `/api/webhooks/:id` | `{ active?, events? }`. Turning it back on clears the failure streak |
-| DELETE | `/api/webhooks/:id` | Remove the endpoint |
-| POST | `/api/webhooks/:id/test` | Queue a `ping` event (202) |
-| GET | `/api/webhooks/:id/deliveries` | Delivery history from MongoDB, paginated |
+
+| Method | Path                           | Notes                                                                |
+| ------ | ------------------------------ | -------------------------------------------------------------------- |
+| POST   | `/api/webhooks`                | `{ url, events }`. Returns the `secret` **once**, so save it         |
+| GET    | `/api/webhooks`                | List endpoints (the secret is never shown again)                     |
+| PATCH  | `/api/webhooks/:id`            | `{ active?, events? }`. Turning it back on clears the failure streak |
+| DELETE | `/api/webhooks/:id`            | Remove the endpoint                                                  |
+| POST   | `/api/webhooks/:id/test`       | Queue a `ping` event (202)                                           |
+| GET    | `/api/webhooks/:id/deliveries` | Delivery history from MongoDB, paginated                             |
 
 Events you can subscribe to: `booking.confirmed` (sent when a booking becomes final: after payment, or at once for a
 free event), `booking.cancelled`, `booking.expired` (unpaid seats were released) and `event.finished`.
@@ -704,15 +719,22 @@ free event), `booking.cancelled`, `booking.expired` (unpaid seats were released)
   "id": "5f0c1a52-...",
   "event": "booking.confirmed",
   "createdAt": "2026-09-30T07:31:13.168Z",
-  "data": { "bookingId": "...", "userId": "...", "eventId": "...", "eventTitle": "Jazz Night", "quantity": 2, "seatsLeft": 8 }
+  "data": {
+    "bookingId": "...",
+    "userId": "...",
+    "eventId": "...",
+    "eventTitle": "Jazz Night",
+    "quantity": 2,
+    "seatsLeft": 8
+  }
 }
 ```
 
-| Header | Meaning |
-|---|---|
-| `X-Webhook-Id` | Unique delivery id (same as `id` in the body). Use it to ignore duplicates |
-| `X-Webhook-Event` | Event name |
-| `X-Webhook-Timestamp` | Unix seconds when this attempt was sent |
+| Header                | Meaning                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| `X-Webhook-Id`        | Unique delivery id (same as `id` in the body). Use it to ignore duplicates         |
+| `X-Webhook-Event`     | Event name                                                                         |
+| `X-Webhook-Timestamp` | Unix seconds when this attempt was sent                                            |
 | `X-Webhook-Signature` | `sha256=` plus the hex HMAC-SHA256 of `"<timestamp>.<raw body>"` using your secret |
 
 Reply with any **2xx within 5 seconds**. Anything else is retried: 6 attempts in total, waiting 30s, 1m, 2m, 4m
@@ -720,6 +742,7 @@ and 8m. After 5 deliveries in a row fail completely, the endpoint is switched of
 In development, `http://localhost` targets are allowed. In production only public `https` URLs are accepted.
 
 **Try it locally:**
+
 1. Register `http://localhost:4000/hook` with `POST /api/webhooks` and copy the returned `secret`.
 2. In another terminal: `WEBHOOK_SECRET=whsec_... node examples/webhook-receiver.js`
 3. Send a `POST /api/webhooks/:id/test`, or make a booking, and watch the receiver print the event.
@@ -746,7 +769,7 @@ endpoint is queued. The worker POSTs a JSON body signed with HMAC-SHA256, and tr
 connection are both checked against private addresses (SSRF). See the Webhooks diagrams above and the
 `examples/webhook-receiver.js` script for the receiving side.
 
-**Payments.** Booking a paid event only *holds* the seats (`PENDING_PAYMENT`, 15 minutes). The booking becomes
+**Payments.** Booking a paid event only _holds_ the seats (`PENDING_PAYMENT`, 15 minutes). The booking becomes
 `CONFIRMED` only when the payment provider's signed webhook says the money arrived. The webhook route checks the
 signature on the raw body, ignores duplicate event ids (an inbox table), compares the paid amount with the
 price stored at booking time, and changes state only with conditional updates, so repeated or reordered events
@@ -767,17 +790,19 @@ Tests run against a separate database so they can never touch your real data. Th
 
 1. Create `.env.test` in the project root (gitignored):
 
-   ```env
-   NODE_ENV=test
-   DATABASE_URL="mysql://root:YOUR_PASSWORD@127.0.0.1:3306/event_booking_test"
-   JWT_SECRET="any-test-secret-with-16-plus-chars"
-   JWT_EXPIRES_IN=1d
-   ```
+```env
+NODE_ENV=test
+DATABASE_URL="mysql://root:YOUR_PASSWORD@127.0.0.1:3306/event_booking_test"
+JWT_SECRET="any-test-secret-with-16-plus-chars"
+JWT_EXPIRES_IN=1d
+```
+
 2. Apply migrations to the test database once: `npm run test:migrate`
 3. Run: `npm test`
 
 In test mode the cache is bypassed and jobs are not queued, so tests need neither Redis nor MongoDB.
 Current coverage (84 tests):
+
 - auth, events, the booking and cancel flow including concurrency, and live socket updates
 - outgoing webhooks: signing, SSRF protection, the admin API, who gets which event, and real deliveries to a local
   receiver covering success, retries, timeouts, redirects and auto-disable
@@ -794,18 +819,18 @@ prisma.config.ts              Prisma 7 config (reads DATABASE_URL)
 public/live-seats.html        Socket.io demo page
 examples/webhook-receiver.js  A standalone webhook receiver that verifies signatures (for trying webhooks)
 src/
-  server.js                   Connects Mongo, starts HTTP, sockets, worker, cron; graceful shutdown
-  app.js                      Express app and middleware (no listen, so tests can import it)
-  config/                     env.js (Zod-validated), prisma.js, mongo.js, redis.js
-  middleware/                 auth.js, role.js, validate.js, errorHandler.js, requestId.js
-  utils/                      AppError, asyncHandler, logger, cache, mailer
-  modules/
+server.js                   Connects Mongo, starts HTTP, sockets, worker, cron; graceful shutdown
+app.js                      Express app and middleware (no listen, so tests can import it)
+config/                     env.js (Zod-validated), prisma.js, mongo.js, redis.js
+middleware/                 auth.js, role.js, validate.js, errorHandler.js, requestId.js
+utils/                      AppError, asyncHandler, logger, cache, mailer
+modules/
     auth/  events/  bookings/ MySQL-backed features (schema, controller, routes)
     reviews/  notifications/  MongoDB-backed features (Mongoose models)
     webhooks/                 OUTGOING webhooks: endpoints (MySQL), delivery log (MongoDB), signing + SSRF checks
     payments/                 INCOMING payment webhook, orders, refunds; providers/ holds the fake provider
-  jobs/                       queue.js, worker.js, webhookWorker.js, cron.js
-  sockets/index.js            Socket.io setup and seat broadcasts
+jobs/                       queue.js, worker.js, webhookWorker.js, cron.js
+sockets/index.js            Socket.io setup and seat broadcasts
 tests/                        Supertest and socket tests
 ```
 
